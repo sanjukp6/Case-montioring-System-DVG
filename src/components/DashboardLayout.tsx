@@ -30,7 +30,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
     { path: '/dashboard', label: 'Home / Dashboard', icon: <Home size={20} /> },
-    { path: '/case/new', label: 'Register New Case', icon: <FilePlus size={20} />, roles: ['Writer', 'SHO'] },
+    { path: '/case/upload', label: 'Upload Cases (Excel)', icon: <FilePlus size={20} />, roles: ['Writer', 'SHO'] },
     { path: '/search', label: 'Search / View Case', icon: <Search size={20} /> },
     { path: '/hearings', label: 'Update Hearing Dates', icon: <Calendar size={20} />, roles: ['SHO', 'SP'] },
     { path: '/reports', label: 'Reports', icon: <FileText size={20} />, roles: ['SHO', 'SP'] },

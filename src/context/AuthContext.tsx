@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { supabase } from '../lib/supabase';
-import { User, AuthUser, MOCK_USERS, UserRole } from '../types/User';
+import * as api from '../lib/api';
+import { User, AuthUser, UserRole } from '../types/User';
 
 interface AuthContextType {
     user: User | null;
@@ -18,108 +18,60 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const AUTH_STORAGE_KEY = 'davangere_auth_user';
-
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [user, setUser] = useState<User | null>(() => {
-        const stored = localStorage.getItem(AUTH_STORAGE_KEY);
-        if (stored) {
-            try {
-                return JSON.parse(stored);
-            } catch {
-                return null;
-            }
-        }
-        return null;
+        // Try to get user from local storage on initial load
+        return api.getStoredUserSync();
     });
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
 
-    // Initialize database with mock users if empty
+    // Verify authentication on mount
     useEffect(() => {
-        const initializeUsers = async () => {
-            try {
-                const { data: existingUsers, error } = await supabase
-                    .from('users')
-                    .select('id')
-                    .limit(1);
-
-                if (error) {
-                    console.log('Users table may not exist yet. Please run the schema.sql first.');
-                    return;
+        const verifyAuth = async () => {
+            if (api.isAuthenticated()) {
+                try {
+                    const result = await api.getCurrentUser();
+                    if (result.success && result.user) {
+                        setUser(result.user);
+                    } else {
+                        // Token is invalid, clear it
+                        api.clearTokens();
+                        setUser(null);
+                    }
+                } catch {
+                    // Server might be down, keep the stored user
+                    console.warn('Could not verify authentication with server');
                 }
-
-                // If no users exist, insert mock users
-                if (!existingUsers || existingUsers.length === 0) {
-                    const usersToInsert = MOCK_USERS.map(u => ({
-                        username: u.username,
-                        password: u.password,
-                        name: u.name,
-                        role: u.role,
-                        police_station: u.policeStation,
-                        employee_number: u.employeeNumber,
-                    }));
-
-                    await supabase.from('users').insert(usersToInsert);
-                }
-            } catch (err) {
-                console.error('Error initializing users:', err);
             }
+            setIsLoading(false);
         };
 
-        initializeUsers();
+        verifyAuth();
     }, []);
 
     const login = async (username: string, password: string): Promise<{ success: boolean; error?: string }> => {
         setIsLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('users')
-                .select('*')
-                .eq('username', username.toLowerCase())
-                .eq('password', password)
-                .single();
+            const result = await api.login(username, password);
 
-            if (error || !data) {
-                // Fallback to local mock users if Supabase fails
-                const localUser = MOCK_USERS.find(
-                    u => u.username.toLowerCase() === username.toLowerCase() && u.password === password
-                );
-
-                if (localUser) {
-                    const { password: _, ...userWithoutPassword } = localUser;
-                    setUser(userWithoutPassword);
-                    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(userWithoutPassword));
-                    setIsLoading(false);
-                    return { success: true };
-                }
-
+            if (result.success && result.user) {
+                setUser(result.user);
                 setIsLoading(false);
-                return { success: false, error: 'Invalid username or password' };
+                return { success: true };
             }
 
-            const loggedInUser: User = {
-                id: data.id,
-                username: data.username,
-                name: data.name,
-                role: data.role as UserRole,
-                policeStation: data.police_station,
-                employeeNumber: data.employee_number,
-            };
-
-            setUser(loggedInUser);
-            localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(loggedInUser));
             setIsLoading(false);
-            return { success: true };
+            return { success: false, error: result.error || 'Invalid username or password' };
         } catch (err) {
             console.error('Login error:', err);
             setIsLoading(false);
-            return { success: false, error: 'Login failed. Please try again.' };
+            return { success: false, error: 'Login failed. Please check if the server is running.' };
         }
     };
 
-    const logout = () => {
+    const logout = async () => {
+        await api.logout();
         setUser(null);
-        localStorage.removeItem(AUTH_STORAGE_KEY);
     };
 
     const changePassword = async (
@@ -130,37 +82,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             return { success: false, error: 'Not authenticated' };
         }
 
-        if (newPassword.length < 6) {
-            return { success: false, error: 'New password must be at least 6 characters' };
+        if (newPassword.length < 8) {
+            return { success: false, error: 'New password must be at least 8 characters' };
         }
 
         try {
-            // Verify current password
-            const { data: userData, error: fetchError } = await supabase
-                .from('users')
-                .select('password')
-                .eq('id', user.id)
-                .single();
-
-            if (fetchError || !userData) {
-                return { success: false, error: 'User not found' };
-            }
-
-            if (userData.password !== currentPassword) {
-                return { success: false, error: 'Current password is incorrect' };
-            }
-
-            // Update password
-            const { error: updateError } = await supabase
-                .from('users')
-                .update({ password: newPassword })
-                .eq('id', user.id);
-
-            if (updateError) {
-                return { success: false, error: 'Failed to update password' };
-            }
-
-            return { success: true };
+            const result = await api.changePassword(currentPassword, newPassword);
+            return result;
         } catch (err) {
             console.error('Change password error:', err);
             return { success: false, error: 'Failed to change password' };
@@ -174,62 +102,25 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const getAllUsers = async (): Promise<User[]> => {
         try {
-            const { data, error } = await supabase
-                .from('users')
-                .select('id, username, name, role, police_station, employee_number')
-                .order('created_at', { ascending: true });
-
-            if (error || !data) {
-                console.error('Error fetching users:', error);
-                return MOCK_USERS.map(({ password: _, ...rest }) => rest);
+            const result = await api.getAllUsers();
+            if (result.success && result.users) {
+                return result.users;
             }
-
-            return data.map(u => ({
-                id: u.id,
-                username: u.username,
-                name: u.name,
-                role: u.role as UserRole,
-                policeStation: u.police_station,
-                employeeNumber: u.employee_number,
-            }));
+            return [];
         } catch (err) {
             console.error('Error fetching users:', err);
-            return MOCK_USERS.map(({ password: _, ...rest }) => rest);
+            return [];
         }
     };
 
     const createUser = async (userData: Omit<AuthUser, 'id'>): Promise<{ success: boolean; error?: string }> => {
         if (!user || user.role !== 'SP') {
-            return { success: false, error: 'Unauthorized' };
+            return { success: false, error: 'Unauthorized. Only SP can create users.' };
         }
 
         try {
-            // Check if username already exists
-            const { data: existingUser } = await supabase
-                .from('users')
-                .select('id')
-                .eq('username', userData.username.toLowerCase())
-                .single();
-
-            if (existingUser) {
-                return { success: false, error: 'Username already exists' };
-            }
-
-            const { error } = await supabase.from('users').insert({
-                username: userData.username.toLowerCase(),
-                password: userData.password,
-                name: userData.name,
-                role: userData.role,
-                police_station: userData.policeStation,
-                employee_number: userData.employeeNumber,
-            });
-
-            if (error) {
-                console.error('Error creating user:', error);
-                return { success: false, error: 'Failed to create user' };
-            }
-
-            return { success: true };
+            const result = await api.createUser(userData);
+            return result;
         } catch (err) {
             console.error('Error creating user:', err);
             return { success: false, error: 'Failed to create user' };
@@ -238,7 +129,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const deleteUser = async (userId: string): Promise<{ success: boolean; error?: string }> => {
         if (!user || user.role !== 'SP') {
-            return { success: false, error: 'Unauthorized' };
+            return { success: false, error: 'Unauthorized. Only SP can delete users.' };
         }
 
         if (userId === user.id) {
@@ -246,17 +137,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         try {
-            const { error } = await supabase
-                .from('users')
-                .delete()
-                .eq('id', userId);
-
-            if (error) {
-                console.error('Error deleting user:', error);
-                return { success: false, error: 'Failed to delete user' };
-            }
-
-            return { success: true };
+            const result = await api.deleteUser(userId);
+            return result;
         } catch (err) {
             console.error('Error deleting user:', err);
             return { success: false, error: 'Failed to delete user' };
@@ -269,29 +151,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         try {
-            const { error } = await supabase
-                .from('users')
-                .update({
-                    name: profileData.name,
-                    employee_number: profileData.employeeNumber || null,
-                })
-                .eq('id', user.id);
+            const result = await api.updateProfile(profileData.name, profileData.employeeNumber);
 
-            if (error) {
-                console.error('Error updating profile:', error);
-                return { success: false, error: 'Failed to update profile' };
+            if (result.success && result.user) {
+                setUser(result.user);
+                return { success: true };
             }
 
-            // Update local state
-            const updatedUser: User = {
-                ...user,
-                name: profileData.name,
-                employeeNumber: profileData.employeeNumber || '',
-            };
-            setUser(updatedUser);
-            localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
-
-            return { success: true };
+            return { success: false, error: result.error || 'Failed to update profile' };
         } catch (err) {
             console.error('Error updating profile:', err);
             return { success: false, error: 'Failed to update profile' };

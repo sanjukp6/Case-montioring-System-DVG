@@ -6,6 +6,7 @@ import { DashboardLayout } from './components/DashboardLayout';
 import { LoginPage } from './components/LoginPage';
 import { Dashboard } from './components/Dashboard';
 import { CaseEntryForm } from './components/CaseEntryForm';
+import { ExcelUpload } from './components/ExcelUpload';
 import { CaseDetail } from './components/CaseDetail';
 import { SearchCases } from './components/SearchCases';
 import { HearingUpdate } from './components/HearingUpdate';
@@ -36,11 +37,11 @@ export function App() {
             />
 
             <Route
-              path="/case/new"
+              path="/case/upload"
               element={
                 <ProtectedRoute allowedRoles={['Writer', 'SHO']}>
                   <DashboardLayout>
-                    <CaseEntryForm />
+                    <ExcelUpload />
                   </DashboardLayout>
                 </ProtectedRoute>
               }

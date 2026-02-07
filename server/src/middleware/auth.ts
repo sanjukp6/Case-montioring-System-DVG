@@ -43,8 +43,8 @@ export function authenticateToken(req: Request, res: Response, next: NextFunctio
  * Generate JWT access token
  */
 export function generateAccessToken(payload: JwtPayload): string {
-    return jwt.sign(payload, JWT_SECRET, {
-        expiresIn: process.env.JWT_EXPIRES_IN || '15m'
+    return jwt.sign(payload as object, JWT_SECRET, {
+        expiresIn: (process.env.JWT_EXPIRES_IN || '15m') as jwt.SignOptions['expiresIn']
     });
 }
 
@@ -52,8 +52,8 @@ export function generateAccessToken(payload: JwtPayload): string {
  * Generate JWT refresh token
  */
 export function generateRefreshToken(payload: JwtPayload): string {
-    return jwt.sign(payload, JWT_SECRET, {
-        expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d'
+    return jwt.sign(payload as object, JWT_SECRET, {
+        expiresIn: (process.env.JWT_REFRESH_EXPIRES_IN || '7d') as jwt.SignOptions['expiresIn']
     });
 }
 

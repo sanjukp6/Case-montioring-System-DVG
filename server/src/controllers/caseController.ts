@@ -1,4 +1,6 @@
 import { Request, Response } from 'express';
+import { RowDataPacket } from 'mysql2';
+import { v4 as uuidv4 } from 'uuid';
 import { pool } from '../config/database.js';
 import { logAudit, getClientIp } from '../middleware/logger.js';
 import { canAccessStation } from '../middleware/roleCheck.js';
@@ -26,6 +28,19 @@ const defaultHigherCourtDetails: HigherCourtDetails = {
     actionAfterDisposal: '',
 };
 
+// Parse JSON field from MySQL (may be string or object)
+function parseJsonField<T>(field: unknown, defaultValue: T): T {
+    if (!field) return defaultValue;
+    if (typeof field === 'string') {
+        try {
+            return JSON.parse(field) as T;
+        } catch {
+            return defaultValue;
+        }
+    }
+    return field as T;
+}
+
 // Convert database row to CaseData
 function dbToCaseData(row: DbCase): CaseData {
     return {
@@ -44,8 +59,8 @@ function dbToCaseData(row: DbCase): CaseData {
         accusedInJudicialCustody: row.accused_in_judicial_custody || 0,
         accusedOnBail: row.accused_on_bail || 0,
         totalWitnesses: row.total_witnesses || 0,
-        witnessDetails: row.witness_details || defaultWitnessDetails,
-        hearings: (row.hearings as Hearing[]) || [],
+        witnessDetails: parseJsonField(row.witness_details, defaultWitnessDetails),
+        hearings: parseJsonField<Hearing[]>(row.hearings, []),
         nextHearingDate: row.next_hearing_date || '',
         currentStageOfTrial: row.current_stage_of_trial || '',
         dateOfFramingCharges: row.date_of_framing_charges || '',
@@ -53,10 +68,10 @@ function dbToCaseData(row: DbCase): CaseData {
         judgmentResult: row.judgment_result || '',
         reasonForAcquittal: row.reason_for_acquittal || '',
         totalAccusedConvicted: row.total_accused_convicted || 0,
-        accusedConvictions: (row.accused_convictions as AccusedConviction[]) || [],
+        accusedConvictions: parseJsonField<AccusedConviction[]>(row.accused_convictions, []),
         fineAmount: row.fine_amount || '',
         victimCompensation: row.victim_compensation || '',
-        higherCourtDetails: row.higher_court_details || defaultHigherCourtDetails,
+        higherCourtDetails: parseJsonField(row.higher_court_details, defaultHigherCourtDetails),
         status: row.status,
         createdBy: row.created_by || undefined,
         approvedBy: row.approved_by || undefined,
@@ -110,14 +125,14 @@ export async function getAllCases(req: Request, res: Response): Promise<void> {
 
         // Filter by police station for non-SP users
         if (req.user?.role !== 'SP') {
-            query += ' WHERE police_station = $1';
+            query += ' WHERE police_station = ?';
             params.push(req.user?.policeStation || '');
         }
 
         query += ' ORDER BY created_at DESC';
 
-        const result = await pool.query<DbCase>(query, params);
-        const cases = result.rows.map(dbToCaseData);
+        const [rows] = await pool.query<(DbCase & RowDataPacket)[]>(query, params);
+        const cases = rows.map(dbToCaseData);
 
         res.json({ success: true, data: cases });
     } catch (error) {
@@ -134,17 +149,17 @@ export async function getCaseById(req: Request, res: Response): Promise<void> {
     try {
         const { id } = req.params;
 
-        const result = await pool.query<DbCase>(
-            'SELECT * FROM cases WHERE id = $1',
+        const [rows] = await pool.query<(DbCase & RowDataPacket)[]>(
+            'SELECT * FROM cases WHERE id = ?',
             [id]
         );
 
-        if (result.rows.length === 0) {
+        if (rows.length === 0) {
             res.status(404).json({ success: false, error: 'Case not found' });
             return;
         }
 
-        const caseData = dbToCaseData(result.rows[0]);
+        const caseData = dbToCaseData(rows[0]);
 
         // Check access permission
         if (!canAccessStation(req, caseData.policeStation)) {
@@ -180,19 +195,20 @@ export async function createCase(req: Request, res: Response): Promise<void> {
         }
 
         const dbData = caseDataToDb(caseData);
+        const caseId = uuidv4();
 
-        const result = await pool.query<DbCase>(
+        await pool.query(
             `INSERT INTO cases (
-        sl_no, police_station, crime_number, sections_of_law, investigating_officer,
+        id, sl_no, police_station, crime_number, sections_of_law, investigating_officer,
         public_prosecutor, date_of_charge_sheet, cc_no_sc_no, court_name, total_accused,
         accused_names, accused_in_judicial_custody, accused_on_bail, total_witnesses,
         witness_details, hearings, next_hearing_date, current_stage_of_trial,
         date_of_framing_charges, date_of_judgment, judgment_result, reason_for_acquittal,
         total_accused_convicted, accused_convictions, fine_amount, victim_compensation,
         higher_court_details, status, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
-      RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
+                caseId,
                 dbData.sl_no, dbData.police_station, dbData.crime_number, dbData.sections_of_law,
                 dbData.investigating_officer, dbData.public_prosecutor, dbData.date_of_charge_sheet,
                 dbData.cc_no_sc_no, dbData.court_name, dbData.total_accused, dbData.accused_names,
@@ -205,16 +221,22 @@ export async function createCase(req: Request, res: Response): Promise<void> {
             ]
         );
 
+        // Fetch created case
+        const [rows] = await pool.query<(DbCase & RowDataPacket)[]>(
+            'SELECT * FROM cases WHERE id = ?',
+            [caseId]
+        );
+
         await logAudit(
             req.user?.userId,
             'CASE_CREATED',
             'case',
-            result.rows[0].id,
+            caseId,
             `Crime Number: ${caseData.crimeNumber}`,
             getClientIp(req)
         );
 
-        res.status(201).json({ success: true, data: dbToCaseData(result.rows[0]) });
+        res.status(201).json({ success: true, data: dbToCaseData(rows[0]) });
     } catch (error) {
         console.error('Create case error:', error);
         res.status(500).json({ success: false, error: 'Internal server error' });
@@ -231,17 +253,17 @@ export async function updateCase(req: Request, res: Response): Promise<void> {
         const caseData = req.body as Partial<CaseData>;
 
         // Get existing case
-        const existingResult = await pool.query<DbCase>(
-            'SELECT * FROM cases WHERE id = $1',
+        const [existingRows] = await pool.query<(DbCase & RowDataPacket)[]>(
+            'SELECT * FROM cases WHERE id = ?',
             [id]
         );
 
-        if (existingResult.rows.length === 0) {
+        if (existingRows.length === 0) {
             res.status(404).json({ success: false, error: 'Case not found' });
             return;
         }
 
-        const existingCase = dbToCaseData(existingResult.rows[0]);
+        const existingCase = dbToCaseData(existingRows[0]);
 
         // Check access permission
         if (!canAccessStation(req, existingCase.policeStation)) {
@@ -251,39 +273,38 @@ export async function updateCase(req: Request, res: Response): Promise<void> {
 
         const dbData = caseDataToDb(caseData);
 
-        const result = await pool.query<DbCase>(
+        await pool.query(
             `UPDATE cases SET
-        sl_no = COALESCE($1, sl_no),
-        police_station = COALESCE($2, police_station),
-        crime_number = COALESCE($3, crime_number),
-        sections_of_law = COALESCE($4, sections_of_law),
-        investigating_officer = COALESCE($5, investigating_officer),
-        public_prosecutor = COALESCE($6, public_prosecutor),
-        date_of_charge_sheet = COALESCE($7, date_of_charge_sheet),
-        cc_no_sc_no = COALESCE($8, cc_no_sc_no),
-        court_name = COALESCE($9, court_name),
-        total_accused = COALESCE($10, total_accused),
-        accused_names = COALESCE($11, accused_names),
-        accused_in_judicial_custody = COALESCE($12, accused_in_judicial_custody),
-        accused_on_bail = COALESCE($13, accused_on_bail),
-        total_witnesses = COALESCE($14, total_witnesses),
-        witness_details = COALESCE($15, witness_details),
-        hearings = COALESCE($16, hearings),
-        next_hearing_date = COALESCE($17, next_hearing_date),
-        current_stage_of_trial = COALESCE($18, current_stage_of_trial),
-        date_of_framing_charges = COALESCE($19, date_of_framing_charges),
-        date_of_judgment = COALESCE($20, date_of_judgment),
-        judgment_result = COALESCE($21, judgment_result),
-        reason_for_acquittal = COALESCE($22, reason_for_acquittal),
-        total_accused_convicted = COALESCE($23, total_accused_convicted),
-        accused_convictions = COALESCE($24, accused_convictions),
-        fine_amount = COALESCE($25, fine_amount),
-        victim_compensation = COALESCE($26, victim_compensation),
-        higher_court_details = COALESCE($27, higher_court_details),
-        status = COALESCE($28, status),
+        sl_no = COALESCE(?, sl_no),
+        police_station = COALESCE(?, police_station),
+        crime_number = COALESCE(?, crime_number),
+        sections_of_law = COALESCE(?, sections_of_law),
+        investigating_officer = COALESCE(?, investigating_officer),
+        public_prosecutor = COALESCE(?, public_prosecutor),
+        date_of_charge_sheet = COALESCE(?, date_of_charge_sheet),
+        cc_no_sc_no = COALESCE(?, cc_no_sc_no),
+        court_name = COALESCE(?, court_name),
+        total_accused = COALESCE(?, total_accused),
+        accused_names = COALESCE(?, accused_names),
+        accused_in_judicial_custody = COALESCE(?, accused_in_judicial_custody),
+        accused_on_bail = COALESCE(?, accused_on_bail),
+        total_witnesses = COALESCE(?, total_witnesses),
+        witness_details = COALESCE(?, witness_details),
+        hearings = COALESCE(?, hearings),
+        next_hearing_date = COALESCE(?, next_hearing_date),
+        current_stage_of_trial = COALESCE(?, current_stage_of_trial),
+        date_of_framing_charges = COALESCE(?, date_of_framing_charges),
+        date_of_judgment = COALESCE(?, date_of_judgment),
+        judgment_result = COALESCE(?, judgment_result),
+        reason_for_acquittal = COALESCE(?, reason_for_acquittal),
+        total_accused_convicted = COALESCE(?, total_accused_convicted),
+        accused_convictions = COALESCE(?, accused_convictions),
+        fine_amount = COALESCE(?, fine_amount),
+        victim_compensation = COALESCE(?, victim_compensation),
+        higher_court_details = COALESCE(?, higher_court_details),
+        status = COALESCE(?, status),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $29
-      RETURNING *`,
+      WHERE id = ?`,
             [
                 dbData.sl_no, dbData.police_station, dbData.crime_number, dbData.sections_of_law,
                 dbData.investigating_officer, dbData.public_prosecutor, dbData.date_of_charge_sheet,
@@ -296,16 +317,22 @@ export async function updateCase(req: Request, res: Response): Promise<void> {
             ]
         );
 
+        // Fetch updated case
+        const [rows] = await pool.query<(DbCase & RowDataPacket)[]>(
+            'SELECT * FROM cases WHERE id = ?',
+            [id]
+        );
+
         await logAudit(
             req.user?.userId,
             'CASE_UPDATED',
             'case',
-            id,
-            `Crime Number: ${result.rows[0].crime_number}`,
+            id as string,
+            `Crime Number: ${rows[0].crime_number}`,
             getClientIp(req)
         );
 
-        res.json({ success: true, data: dbToCaseData(result.rows[0]) });
+        res.json({ success: true, data: dbToCaseData(rows[0]) });
     } catch (error) {
         console.error('Update case error:', error);
         res.status(500).json({ success: false, error: 'Internal server error' });
@@ -321,17 +348,17 @@ export async function deleteCase(req: Request, res: Response): Promise<void> {
         const { id } = req.params;
 
         // Get existing case
-        const existingResult = await pool.query<DbCase>(
-            'SELECT * FROM cases WHERE id = $1',
+        const [existingRows] = await pool.query<(DbCase & RowDataPacket)[]>(
+            'SELECT * FROM cases WHERE id = ?',
             [id]
         );
 
-        if (existingResult.rows.length === 0) {
+        if (existingRows.length === 0) {
             res.status(404).json({ success: false, error: 'Case not found' });
             return;
         }
 
-        const existingCase = dbToCaseData(existingResult.rows[0]);
+        const existingCase = dbToCaseData(existingRows[0]);
 
         // Check access permission
         if (!canAccessStation(req, existingCase.policeStation)) {
@@ -339,13 +366,13 @@ export async function deleteCase(req: Request, res: Response): Promise<void> {
             return;
         }
 
-        await pool.query('DELETE FROM cases WHERE id = $1', [id]);
+        await pool.query('DELETE FROM cases WHERE id = ?', [id]);
 
         await logAudit(
             req.user?.userId,
             'CASE_DELETED',
             'case',
-            id,
+            id as string,
             `Crime Number: ${existingCase.crimeNumber}`,
             getClientIp(req)
         );
@@ -373,24 +400,25 @@ export async function searchCases(req: Request, res: Response): Promise<void> {
         let query = `
       SELECT * FROM cases 
       WHERE (
-        crime_number ILIKE $1 OR
-        accused_names ILIKE $1 OR
-        sections_of_law ILIKE $1 OR
-        investigating_officer ILIKE $1
+        crime_number LIKE ? OR
+        accused_names LIKE ? OR
+        sections_of_law LIKE ? OR
+        investigating_officer LIKE ?
       )
     `;
-        const params: string[] = [`%${q}%`];
+        const searchPattern = `%${q}%`;
+        const params: string[] = [searchPattern, searchPattern, searchPattern, searchPattern];
 
         // Filter by police station for non-SP users
         if (req.user?.role !== 'SP') {
-            query += ' AND police_station = $2';
+            query += ' AND police_station = ?';
             params.push(req.user?.policeStation || '');
         }
 
         query += ' ORDER BY created_at DESC LIMIT 50';
 
-        const result = await pool.query<DbCase>(query, params);
-        const cases = result.rows.map(dbToCaseData);
+        const [rows] = await pool.query<(DbCase & RowDataPacket)[]>(query, params);
+        const cases = rows.map(dbToCaseData);
 
         res.json({ success: true, data: cases });
     } catch (error) {
@@ -427,6 +455,7 @@ export async function bulkUpsertCases(req: Request, res: Response): Promise<void
             }
 
             // Check access permission
+            console.log(`User role: ${req.user?.role}, checking access to: ${caseData.policeStation}, can access: ${canAccessStation(req, caseData.policeStation)}`);
             if (!canAccessStation(req, caseData.policeStation)) {
                 errors.push({ row: i + 1, error: `Cannot access police station: ${caseData.policeStation}` });
                 continue;
@@ -434,45 +463,45 @@ export async function bulkUpsertCases(req: Request, res: Response): Promise<void
 
             try {
                 // Check if case exists by crime_number + police_station
-                const existingResult = await pool.query<DbCase>(
-                    'SELECT id FROM cases WHERE crime_number = $1 AND police_station = $2',
+                const [existingRows] = await pool.query<(DbCase & RowDataPacket)[]>(
+                    'SELECT id FROM cases WHERE crime_number = ? AND police_station = ?',
                     [caseData.crimeNumber, caseData.policeStation]
                 );
 
                 const dbData = caseDataToDb(caseData);
 
-                if (existingResult.rows.length > 0) {
+                if (existingRows.length > 0) {
                     // Update existing case
-                    const existingId = existingResult.rows[0].id;
+                    const existingId = existingRows[0].id;
                     await pool.query(
                         `UPDATE cases SET
-                            sl_no = COALESCE($1, sl_no),
-                            sections_of_law = COALESCE($2, sections_of_law),
-                            investigating_officer = COALESCE($3, investigating_officer),
-                            public_prosecutor = COALESCE($4, public_prosecutor),
-                            date_of_charge_sheet = COALESCE($5, date_of_charge_sheet),
-                            cc_no_sc_no = COALESCE($6, cc_no_sc_no),
-                            court_name = COALESCE($7, court_name),
-                            total_accused = COALESCE($8, total_accused),
-                            accused_names = COALESCE($9, accused_names),
-                            accused_in_judicial_custody = COALESCE($10, accused_in_judicial_custody),
-                            accused_on_bail = COALESCE($11, accused_on_bail),
-                            total_witnesses = COALESCE($12, total_witnesses),
-                            witness_details = COALESCE($13, witness_details),
-                            hearings = COALESCE($14, hearings),
-                            next_hearing_date = COALESCE($15, next_hearing_date),
-                            current_stage_of_trial = COALESCE($16, current_stage_of_trial),
-                            date_of_framing_charges = COALESCE($17, date_of_framing_charges),
-                            date_of_judgment = COALESCE($18, date_of_judgment),
-                            judgment_result = COALESCE($19, judgment_result),
-                            reason_for_acquittal = COALESCE($20, reason_for_acquittal),
-                            total_accused_convicted = COALESCE($21, total_accused_convicted),
-                            accused_convictions = COALESCE($22, accused_convictions),
-                            fine_amount = COALESCE($23, fine_amount),
-                            victim_compensation = COALESCE($24, victim_compensation),
-                            higher_court_details = COALESCE($25, higher_court_details),
+                            sl_no = COALESCE(?, sl_no),
+                            sections_of_law = COALESCE(?, sections_of_law),
+                            investigating_officer = COALESCE(?, investigating_officer),
+                            public_prosecutor = COALESCE(?, public_prosecutor),
+                            date_of_charge_sheet = COALESCE(?, date_of_charge_sheet),
+                            cc_no_sc_no = COALESCE(?, cc_no_sc_no),
+                            court_name = COALESCE(?, court_name),
+                            total_accused = COALESCE(?, total_accused),
+                            accused_names = COALESCE(?, accused_names),
+                            accused_in_judicial_custody = COALESCE(?, accused_in_judicial_custody),
+                            accused_on_bail = COALESCE(?, accused_on_bail),
+                            total_witnesses = COALESCE(?, total_witnesses),
+                            witness_details = COALESCE(?, witness_details),
+                            hearings = COALESCE(?, hearings),
+                            next_hearing_date = COALESCE(?, next_hearing_date),
+                            current_stage_of_trial = COALESCE(?, current_stage_of_trial),
+                            date_of_framing_charges = COALESCE(?, date_of_framing_charges),
+                            date_of_judgment = COALESCE(?, date_of_judgment),
+                            judgment_result = COALESCE(?, judgment_result),
+                            reason_for_acquittal = COALESCE(?, reason_for_acquittal),
+                            total_accused_convicted = COALESCE(?, total_accused_convicted),
+                            accused_convictions = COALESCE(?, accused_convictions),
+                            fine_amount = COALESCE(?, fine_amount),
+                            victim_compensation = COALESCE(?, victim_compensation),
+                            higher_court_details = COALESCE(?, higher_court_details),
                             updated_at = CURRENT_TIMESTAMP
-                        WHERE id = $26`,
+                        WHERE id = ?`,
                         [
                             dbData.sl_no, dbData.sections_of_law, dbData.investigating_officer,
                             dbData.public_prosecutor, dbData.date_of_charge_sheet, dbData.cc_no_sc_no,
@@ -497,18 +526,19 @@ export async function bulkUpsertCases(req: Request, res: Response): Promise<void
                     );
                 } else {
                     // Insert new case
-                    const result = await pool.query<DbCase>(
+                    const newCaseId = uuidv4();
+                    await pool.query(
                         `INSERT INTO cases (
-                            sl_no, police_station, crime_number, sections_of_law, investigating_officer,
+                            id, sl_no, police_station, crime_number, sections_of_law, investigating_officer,
                             public_prosecutor, date_of_charge_sheet, cc_no_sc_no, court_name, total_accused,
                             accused_names, accused_in_judicial_custody, accused_on_bail, total_witnesses,
                             witness_details, hearings, next_hearing_date, current_stage_of_trial,
                             date_of_framing_charges, date_of_judgment, judgment_result, reason_for_acquittal,
                             total_accused_convicted, accused_convictions, fine_amount, victim_compensation,
                             higher_court_details, status, created_by
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
-                        RETURNING id`,
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                         [
+                            newCaseId,
                             dbData.sl_no, dbData.police_station, dbData.crime_number, dbData.sections_of_law,
                             dbData.investigating_officer, dbData.public_prosecutor, dbData.date_of_charge_sheet,
                             dbData.cc_no_sc_no, dbData.court_name, dbData.total_accused, dbData.accused_names,
@@ -526,7 +556,7 @@ export async function bulkUpsertCases(req: Request, res: Response): Promise<void
                         req.user?.userId,
                         'CASE_BULK_CREATED',
                         'case',
-                        result.rows[0].id,
+                        newCaseId,
                         `Crime Number: ${caseData.crimeNumber}`,
                         getClientIp(req)
                     );

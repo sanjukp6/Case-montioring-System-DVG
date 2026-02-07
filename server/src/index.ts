@@ -28,19 +28,19 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Rate limiting
+// Rate limiting (generous for bulk operations)
 const limiter = rateLimit({
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'), // 15 minutes
-    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'), // Limit each IP
+    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '1000'), // 1000 requests per window (for bulk uploads)
     message: { success: false, error: 'Too many requests, please try again later' },
     standardHeaders: true,
     legacyHeaders: false,
 });
 app.use('/api/', limiter);
 
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+// Body parsing - increased limit for bulk uploads (up to 10,000 cases)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Request logging
 app.use(morgan('combined'));
@@ -49,9 +49,9 @@ app.use(requestLogger);
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
     try {
-        const client = await pool.connect();
-        await client.query('SELECT 1');
-        client.release();
+        const connection = await pool.getConnection();
+        await connection.query('SELECT 1');
+        connection.release();
 
         res.json({
             success: true,
@@ -97,9 +97,9 @@ async function startServer() {
     if (!dbConnected) {
         console.error('Failed to connect to database. Please check your configuration.');
         console.log('');
-        console.log('Make sure PostgreSQL is running and the database exists.');
+        console.log('Make sure MySQL is running and the database exists.');
         console.log('To create the database, run:');
-        console.log('  createdb case_monitoring');
+        console.log('  mysql -u root -p -e "CREATE DATABASE case_monitoring"');
         console.log('');
         console.log('Then initialize the database with:');
         console.log('  npm run db:init');

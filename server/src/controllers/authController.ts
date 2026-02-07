@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import { RowDataPacket } from 'mysql2';
 import { pool } from '../config/database.js';
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../middleware/auth.js';
 import { logAudit, getClientIp } from '../middleware/logger.js';
@@ -33,18 +34,18 @@ export async function login(req: Request, res: Response): Promise<void> {
         }
 
         // Find user by username
-        const result = await pool.query<DbUser>(
-            'SELECT * FROM users WHERE username = $1',
+        const [rows] = await pool.query<(DbUser & RowDataPacket)[]>(
+            'SELECT * FROM users WHERE username = ?',
             [username]
         );
 
-        if (result.rows.length === 0) {
+        if (rows.length === 0) {
             await logAudit(undefined, 'LOGIN_FAILED', 'auth', undefined, `Invalid username: ${username}`, getClientIp(req));
             res.status(401).json({ success: false, error: 'Invalid credentials' });
             return;
         }
 
-        const dbUser = result.rows[0];
+        const dbUser = rows[0];
 
         // Verify password
         const isValidPassword = await bcrypt.compare(password, dbUser.password);
@@ -107,17 +108,17 @@ export async function getCurrentUser(req: Request, res: Response): Promise<void>
             return;
         }
 
-        const result = await pool.query<DbUser>(
-            'SELECT * FROM users WHERE id = $1',
+        const [rows] = await pool.query<(DbUser & RowDataPacket)[]>(
+            'SELECT * FROM users WHERE id = ?',
             [req.user.userId]
         );
 
-        if (result.rows.length === 0) {
+        if (rows.length === 0) {
             res.status(404).json({ success: false, error: 'User not found' });
             return;
         }
 
-        res.json({ success: true, data: dbToUser(result.rows[0]) });
+        res.json({ success: true, data: dbToUser(rows[0]) });
     } catch (error) {
         console.error('Get current user error:', error);
         res.status(500).json({ success: false, error: 'Internal server error' });
@@ -144,17 +145,17 @@ export async function refreshToken(req: Request, res: Response): Promise<void> {
         }
 
         // Verify user still exists
-        const result = await pool.query<DbUser>(
-            'SELECT * FROM users WHERE id = $1',
+        const [rows] = await pool.query<(DbUser & RowDataPacket)[]>(
+            'SELECT * FROM users WHERE id = ?',
             [payload.userId]
         );
 
-        if (result.rows.length === 0) {
+        if (rows.length === 0) {
             res.status(401).json({ success: false, error: 'User no longer exists' });
             return;
         }
 
-        const dbUser = result.rows[0];
+        const dbUser = rows[0];
         const tokenPayload: JwtPayload = {
             userId: dbUser.id,
             username: dbUser.username,
@@ -202,18 +203,18 @@ export async function changePassword(req: Request, res: Response): Promise<void>
         }
 
         // Get current user
-        const result = await pool.query<DbUser>(
-            'SELECT * FROM users WHERE id = $1',
+        const [rows] = await pool.query<(DbUser & RowDataPacket)[]>(
+            'SELECT * FROM users WHERE id = ?',
             [req.user.userId]
         );
 
-        if (result.rows.length === 0) {
+        if (rows.length === 0) {
             res.status(404).json({ success: false, error: 'User not found' });
             return;
         }
 
         // Verify current password
-        const isValidPassword = await bcrypt.compare(currentPassword, result.rows[0].password);
+        const isValidPassword = await bcrypt.compare(currentPassword, rows[0].password);
         if (!isValidPassword) {
             await logAudit(req.user.userId, 'PASSWORD_CHANGE_FAILED', 'auth', undefined, 'Invalid current password', getClientIp(req));
             res.status(401).json({ success: false, error: 'Current password is incorrect' });
@@ -225,7 +226,7 @@ export async function changePassword(req: Request, res: Response): Promise<void>
 
         // Update password
         await pool.query(
-            'UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+            'UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
             [hashedPassword, req.user.userId]
         );
 
@@ -257,22 +258,27 @@ export async function updateProfile(req: Request, res: Response): Promise<void> 
         }
 
         // Update profile
-        const result = await pool.query<DbUser>(
+        await pool.query(
             `UPDATE users 
-       SET name = $1, employee_number = COALESCE($2, employee_number), updated_at = CURRENT_TIMESTAMP 
-       WHERE id = $3 
-       RETURNING *`,
+       SET name = ?, employee_number = COALESCE(?, employee_number), updated_at = CURRENT_TIMESTAMP 
+       WHERE id = ?`,
             [name, employeeNumber, req.user.userId]
         );
 
-        if (result.rows.length === 0) {
+        // Fetch updated user
+        const [rows] = await pool.query<(DbUser & RowDataPacket)[]>(
+            'SELECT * FROM users WHERE id = ?',
+            [req.user.userId]
+        );
+
+        if (rows.length === 0) {
             res.status(404).json({ success: false, error: 'User not found' });
             return;
         }
 
         await logAudit(req.user.userId, 'PROFILE_UPDATED', 'user', req.user.userId, undefined, getClientIp(req));
 
-        res.json({ success: true, data: dbToUser(result.rows[0]) });
+        res.json({ success: true, data: dbToUser(rows[0]) });
     } catch (error) {
         console.error('Update profile error:', error);
         res.status(500).json({ success: false, error: 'Internal server error' });

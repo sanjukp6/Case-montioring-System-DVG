@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { pool } from '../config/database.js';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Log actions to the audit_logs table
@@ -14,9 +15,9 @@ export async function logAudit(
 ): Promise<void> {
     try {
         await pool.query(
-            `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, ip_address)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-            [userId || null, action, resourceType, resourceId || null, details || null, ipAddress || null]
+            `INSERT INTO audit_logs (id, user_id, action, resource_type, resource_id, details, ip_address)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [uuidv4(), userId || null, action, resourceType, resourceId || null, details || null, ipAddress || null]
         );
     } catch (error) {
         console.error('Failed to write audit log:', error);

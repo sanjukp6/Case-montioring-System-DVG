@@ -4,7 +4,8 @@ import * as XLSX from 'xlsx';
 import { CaseData, initialCaseData, WitnessDetails, HigherCourtDetails } from '../types/Case';
 import * as api from '../lib/api';
 import { useCases } from '../context/CaseContext';
-import { Upload, FileSpreadsheet, Download, CheckCircle, AlertCircle, X, Loader2 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { Upload, FileSpreadsheet, Download, CheckCircle, AlertCircle, X, Loader2, ShieldAlert } from 'lucide-react';
 
 // Excel column mapping to CaseData fields
 const COLUMN_MAPPING: Record<string, keyof CaseData> = {
@@ -58,11 +59,13 @@ export function ExcelUpload() {
     const navigate = useNavigate();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const { refreshCases } = useCases();
+    const { user } = useAuth();
 
     const [isDragging, setIsDragging] = useState(false);
     const [file, setFile] = useState<File | null>(null);
     const [parsedCases, setParsedCases] = useState<CaseData[]>([]);
     const [parseError, setParseError] = useState<string | null>(null);
+    const [stationError, setStationError] = useState<{ invalidStations: string[], validCount: number, invalidCount: number } | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const [uploadResult, setUploadResult] = useState<api.BulkUploadResult | null>(null);
     const [uploadError, setUploadError] = useState<string | null>(null);
@@ -121,6 +124,27 @@ export function ExcelUpload() {
                 return caseData;
             });
 
+            // Validate police stations for SHO users
+            if (user?.role === 'SHO' && user?.policeStation) {
+                const userStation = user.policeStation.toLowerCase().trim();
+                const invalidCases = cases.filter(c => {
+                    const caseStation = c.policeStation?.toLowerCase().trim() || '';
+                    return caseStation !== '' && caseStation !== userStation;
+                });
+
+                if (invalidCases.length > 0) {
+                    const uniqueInvalidStations = [...new Set(invalidCases.map(c => c.policeStation))];
+                    setStationError({
+                        invalidStations: uniqueInvalidStations,
+                        validCount: cases.length - invalidCases.length,
+                        invalidCount: invalidCases.length
+                    });
+                    setParsedCases([]);
+                    return;
+                }
+            }
+
+            setStationError(null);
             setParsedCases(cases);
             setParseError(null);
         } catch (err) {
@@ -140,6 +164,7 @@ export function ExcelUpload() {
         setParsedCases([]);
         setUploadResult(null);
         setUploadError(null);
+        setStationError(null);
 
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -243,11 +268,11 @@ export function ExcelUpload() {
         XLSX.writeFile(wb, 'case_upload_template.xlsx');
     };
 
-    // Clear current file
     const clearFile = () => {
         setFile(null);
         setParsedCases([]);
         setParseError(null);
+        setStationError(null);
         setUploadResult(null);
         setUploadError(null);
         if (fileInputRef.current) {
@@ -336,6 +361,40 @@ export function ExcelUpload() {
                         <div>
                             <p className="text-sm font-medium text-red-800">Error parsing file</p>
                             <p className="text-sm text-red-600">{parseError}</p>
+                        </div>
+                    </div>
+                )}
+
+                {/* Station Validation Error for SHO */}
+                {stationError && (
+                    <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                        <div className="flex items-start space-x-3">
+                            <ShieldAlert className="h-6 w-6 text-red-600 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1">
+                                <p className="text-lg font-bold text-red-800">⚠️ Station Access Error</p>
+                                <p className="text-sm text-red-700 mt-1">
+                                    You can only upload cases for your police station: <strong>{user?.policeStation}</strong>
+                                </p>
+                                <div className="mt-3 p-3 bg-white rounded-lg border border-red-200">
+                                    <p className="text-sm font-medium text-red-800 mb-2">
+                                        Found {stationError.invalidCount} case(s) from other station(s):
+                                    </p>
+                                    <ul className="text-sm text-red-700 list-disc list-inside">
+                                        {stationError.invalidStations.map((station, i) => (
+                                            <li key={i}>{station}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                                <p className="text-sm text-gray-600 mt-3">
+                                    Please remove cases from other stations and upload again, or contact the respective SHO to upload those cases.
+                                </p>
+                                <button
+                                    onClick={clearFile}
+                                    className="mt-3 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700"
+                                >
+                                    Clear & Try Again
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}

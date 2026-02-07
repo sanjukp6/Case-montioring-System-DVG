@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import {
     Home,
@@ -15,6 +16,7 @@ import {
     Shield,
     ChevronDown,
     Scale,
+    Languages,
 } from 'lucide-react';
 
 interface DashboardLayoutProps {
@@ -23,26 +25,31 @@ interface DashboardLayoutProps {
 
 interface NavItem {
     path: string;
-    label: string;
+    labelKey: string;
     icon: React.ReactNode;
     roles?: ('Writer' | 'SHO' | 'SP')[];
 }
 
 const navItems: NavItem[] = [
-    { path: '/dashboard', label: 'Home / Dashboard', icon: <Home size={20} /> },
-    { path: '/case/upload', label: 'Upload Cases (Excel)', icon: <FilePlus size={20} />, roles: ['Writer', 'SHO'] },
-    { path: '/search', label: 'Search / View Case', icon: <Search size={20} /> },
-    { path: '/hearings', label: 'Update Hearing Dates', icon: <Calendar size={20} />, roles: ['SHO', 'SP'] },
-    { path: '/reports', label: 'Reports', icon: <FileText size={20} />, roles: ['SHO', 'SP'] },
-    { path: '/users', label: 'User Management', icon: <Users size={20} />, roles: ['SP'] },
+    { path: '/dashboard', labelKey: 'nav.home', icon: <Home size={20} /> },
+    { path: '/case/upload', labelKey: 'nav.uploadCases', icon: <FilePlus size={20} />, roles: ['Writer', 'SHO', 'SP'] },
+    { path: '/search', labelKey: 'nav.searchCases', icon: <Search size={20} /> },
+    { path: '/hearings', labelKey: 'nav.updateHearings', icon: <Calendar size={20} />, roles: ['SHO', 'SP'] },
+    { path: '/reports', labelKey: 'nav.reports', icon: <FileText size={20} />, roles: ['SHO', 'SP'] },
+    { path: '/users', labelKey: 'nav.userManagement', icon: <Users size={20} />, roles: ['SP'] },
 ];
 
 export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
+    const { t, i18n } = useTranslation();
     const { user, logout, hasRole } = useAuth();
     const navigate = useNavigate();
-    const location = useLocation();
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
+
+    const toggleLanguage = () => {
+        const newLang = i18n.language === 'en' ? 'kn' : 'en';
+        i18n.changeLanguage(newLang);
+    };
 
     const handleLogout = () => {
         logout();
@@ -80,8 +87,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
                             <Scale size={24} />
                         </div>
                         <div>
-                            <h1 className="font-bold text-lg leading-tight">Case Tracking</h1>
-                            <p className="text-xs text-blue-300">Davangere Police</p>
+                            <h1 className="font-bold text-lg leading-tight">{t('nav.caseTracking')}</h1>
+                            <p className="text-xs text-blue-300">{t('nav.davangerePolice')}</p>
                         </div>
                     </div>
                 </div>
@@ -101,7 +108,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
                             }
                         >
                             {item.icon}
-                            <span className="font-medium">{item.label}</span>
+                            <span className="font-medium">{t(item.labelKey)}</span>
                         </NavLink>
                     ))}
                 </nav>
@@ -140,7 +147,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
                         <div className="hidden sm:flex items-center space-x-2">
                             <Shield size={20} className="text-blue-600" />
                             <span className="text-gray-700">
-                                Welcome, <strong>{user?.name}</strong>
+                                {t('common.welcome')}, <strong>{user?.name}</strong>
                             </span>
                             <span className={`text-xs px-2 py-1 rounded-full font-medium ${getRoleBadgeColor(user?.role || '')}`}>
                                 {user?.role}
@@ -149,6 +156,18 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
 
                         {/* Right Side Actions */}
                         <div className="flex items-center space-x-2">
+                            {/* Language Toggle Button */}
+                            <button
+                                onClick={toggleLanguage}
+                                className="flex items-center space-x-1 px-3 py-2 rounded-lg hover:bg-gray-100 transition border border-gray-200"
+                                title={t('language.toggle')}
+                            >
+                                <Languages size={18} className="text-blue-600" />
+                                <span className="text-sm font-medium text-gray-700">
+                                    {i18n.language === 'en' ? 'ಕ' : 'EN'}
+                                </span>
+                            </button>
+
                             {/* Mobile: Show role badge */}
                             <span className={`sm:hidden text-xs px-2 py-1 rounded-full font-medium ${getRoleBadgeColor(user?.role || '')}`}>
                                 {user?.role}

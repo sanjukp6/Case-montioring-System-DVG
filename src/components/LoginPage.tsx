@@ -78,9 +78,9 @@ export const LoginPage: React.FC = () => {
                         <div className="flex items-center space-x-3">
                             <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center p-1 shadow-md overflow-hidden">
                                 <img
-                                    src="/logo.png"
-                                    alt="Police Case Tracking Logo"
-                                    className="w-full h-full object-cover"
+                                    src="/karnataka-police-logo.png"
+                                    alt="Karnataka State Police Logo"
+                                    className="w-full h-full object-contain"
                                 />
                             </div>
                             <div className="hidden sm:block">
@@ -247,20 +247,42 @@ export const LoginPage: React.FC = () => {
 
                     {/* Demo Credentials Note */}
                     <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
-                        <p className="font-semibold text-blue-800 mb-2">Demo Credentials:</p>
-                        <div className="grid grid-cols-3 gap-2 text-blue-700">
-                            <div>
-                                <p className="font-medium">Writer:</p>
-                                <p className="text-xs">writer1 / password123</p>
+                        <p className="font-semibold text-blue-800 mb-3">🔑 Demo Credentials (Password: password123)</p>
+
+                        {/* SP Login */}
+                        <div className="mb-3 p-2 bg-purple-100 rounded-lg">
+                            <p className="font-medium text-purple-800">👮 SP (District HQ - All Stations)</p>
+                            <p className="text-xs text-purple-700">Username: <strong>sp1</strong></p>
+                        </div>
+
+                        {/* SHO Logins */}
+                        <details className="group">
+                            <summary className="cursor-pointer font-medium text-blue-800 hover:text-blue-600 flex items-center">
+                                <span>📋 SHO Logins (Click to expand)</span>
+                            </summary>
+                            <div className="mt-2 grid grid-cols-2 gap-1 text-xs max-h-48 overflow-y-auto">
+                                <div className="p-1.5 bg-white rounded"><strong>sho_anagodups</strong> → Anagodu PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_avaragerep</strong> → Avaragere PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_bashanagar</strong> → Basha Nagar PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_channagiri</strong> → Channagiri PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho1</strong> → Davangere City PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_davangerer</strong> → Davangere Rural PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho2</strong> → Harihar PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_hariharaps</strong> → Harihara PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_honnalips</strong> → Honnali PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_jagalurps</strong> → Jagalur PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_lokikereps</strong> → Lokikere PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_mayakondap</strong> → Mayakonda PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_mccbblockp</strong> → MCC B Block PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_nyamathips</strong> → Nyamathi PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_pjextensio</strong> → PJ Extension PS</div>
+                                <div className="p-1.5 bg-white rounded"><strong>sho_vidhyanaga</strong> → Vidhyanagar PS</div>
                             </div>
-                            <div>
-                                <p className="font-medium">SHO:</p>
-                                <p className="text-xs">sho1 / password123</p>
-                            </div>
-                            <div>
-                                <p className="font-medium">SP:</p>
-                                <p className="text-xs">sp1 / password123</p>
-                            </div>
+                        </details>
+
+                        {/* Writer Info */}
+                        <div className="mt-2 text-xs text-gray-600">
+                            Writers: writer1, writer2 (same password)
                         </div>
                     </div>
                 </div>

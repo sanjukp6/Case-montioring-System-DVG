@@ -109,8 +109,8 @@ export interface DbCase {
     accused_in_judicial_custody: number;
     accused_on_bail: number;
     total_witnesses: number;
-    witness_details: WitnessDetails;
-    hearings: Hearing[];
+    witness_details: WitnessDetails | string | null;  // MySQL JSON can be string or parsed object
+    hearings: Hearing[] | string | null;
     next_hearing_date: string | null;
     current_stage_of_trial: string;
     date_of_framing_charges: string | null;
@@ -118,10 +118,10 @@ export interface DbCase {
     judgment_result: string;
     reason_for_acquittal: string;
     total_accused_convicted: number;
-    accused_convictions: AccusedConviction[];
+    accused_convictions: AccusedConviction[] | string | null;
     fine_amount: string;
     victim_compensation: string;
-    higher_court_details: HigherCourtDetails;
+    higher_court_details: HigherCourtDetails | string | null;
     status: 'draft' | 'pending_approval' | 'approved';
     created_by: string | null;
     approved_by: string | null;

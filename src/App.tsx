@@ -39,7 +39,7 @@ export function App() {
             <Route
               path="/case/upload"
               element={
-                <ProtectedRoute allowedRoles={['Writer', 'SHO']}>
+                <ProtectedRoute allowedRoles={['Writer', 'SHO', 'SP']}>
                   <DashboardLayout>
                     <ExcelUpload />
                   </DashboardLayout>
